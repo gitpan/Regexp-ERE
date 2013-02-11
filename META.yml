@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Regexp-ERE
-version:            0.01
+version:            0.02
 abstract:           extended regular expressions and finite automata
 author:
     - Loïc Jonas Etienne <loic.etienne@tech.swisssign.com>

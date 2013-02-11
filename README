@@ -16,20 +16,29 @@ Pure perl module for:
     (powerset construction)
 
   - Computing minimal dfa from dfa
-    (Hopcrofs's algorithm)
+    (Hopcrofts's algorithm)
 
-  - Computing ERE oder Perl Regular Expressions from nfa or dfa
+  - Computing ERE or Perl Regular Expressions from nfa or dfa
     (Warshall algorithm)
 
   - Heuristically deriving from a nfa or dfa (possibly weaker) constraints
     suitable for display in a graphical user interface,
-    i.e. a sequence of wigets of type 'free text' and 'drop down';
+    i.e. a sequence of widgets of type 'free text' and 'drop down';
     Example: '^(abc|def).*' => $nfa => [['abc', 'def'], 'free text']
 
 
 INSTALLATION
 
     See the file INSTALL
+
+VERSIONS
+
+    0.01 initial version
+    0.02 minor documentation improvements
+         fixes for bugs revealed by perl 17:
+           - results independent of the sort algorithm (stable/unstable)
+           - improved prefix/suffix factorization
+           - improved test cases
 
 
 AUTHOR

@@ -4,7 +4,7 @@ use warnings;
 use integer;
 
 package Regexp::ERE;
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 BEGIN {
     use Exporter ();
@@ -36,6 +36,8 @@ BEGIN {
     );
 }
 
+=encoding utf8
+
 =head1 NAME
 
 Regexp::ERE - extended regular expressions and finite automata
@@ -61,7 +63,7 @@ Regexp::ERE - extended regular expressions and finite automata
   my $inter_nfa = nfa_inter($nfa1, $nfa2);
 
   # compute extended regular expression (string)
-  my $ere  = nfa_to_regex($inter_nfa);
+  my $ere = nfa_to_regex($inter_nfa);
 
   # compute perl regular expression
   my $perlre = nfa_to_regex($inter_nfa, 1);
@@ -98,11 +100,11 @@ Computing Deterministic Finite Automata (C<$dfa>s) from C<$nfa>s
 
 =item *
 
-Computing minimal C<$dfa> from C<$dfa> (Hopcroft's algorithm)
+Computing minimal C<$dfa>s from C<$dfa>s (Hopcroft's algorithm)
 
 =item *
 
-Computing eres or Perl Regular Expressions from C<$nfa> or C<$dfa>
+Computing C<$ere>s or Perl Regular Expressions from C<$nfa> or C<$dfa>
 (Warshall algorithm)
 
 =item *
@@ -115,7 +117,7 @@ Example: '^(abc|def)' => $nfa => [['abc', 'def'], 'free text']
 
 =back
 
-=head1 GLOSSARY AND CONVERSION OVERVIEW
+=head1 GLOSSARY AND CONVERSIONS OVERVIEW
 
 =head2 Conversions overview
 
@@ -123,7 +125,7 @@ Example: '^(abc|def)' => $nfa => [['abc', 'def'], 'free text']
                         -> $input_constraints
 
   The second argument of -> $regex conversions is an optional boolean,
-      true : conversion to a perl regular expression string
+      true : conversion to a compiled perl regular expression
       false: conversion to an ere string
 
   The -> $input_constraints conversions return a pair (
@@ -143,7 +145,7 @@ A set of unicode characters.
 =item $ere
 
 Extended regular expression (string).
-See C<ere_to_nfa()> for the exact syntax.
+See C<ere_to_nfa($ere)> for the exact syntax.
 
 =item $perlre
 
@@ -155,7 +157,7 @@ Non-deterministic finite automaton
 
 =item $dfa
 
-Deterministic finite automaton (is also a C<$nfa>)
+Deterministic finite automaton (special case of C<$nfa>)
 
 =item $tree
 
@@ -166,7 +168,7 @@ similar to a parse tree (but used for generating, not for parsing).
 =item $input_constraints
 
 Ad-hoc data structure representing a list of gui-widgets
-(free text and drop-down lists),
+(free text fields and drop-down lists),
 a helper for entering inputs
 conforming to a given C<$nfa>.
 
@@ -203,6 +205,13 @@ use constant {
 
 Each of the documented subroutines can be imported,
 for instance C<use ERE qw(&ere_to_nfa &nfa_match);>.
+
+=cut
+
+
+##############################################################################
+# $char_class
+##############################################################################
 
 =head2 Character class
 
@@ -291,7 +300,7 @@ Example:
     returns [[65, 90], [97, 122]]
     (i.e [f-p]|[A-Z]|[a-f]|[q-z] => [A-Z]|[a-z])
 
-Note that both $interval_list and $char_class are both lists of intervals,
+Note that both $interval_list and $char_class are lists of intervals,
 but only $char_class obeys the constraints above,
 while $interval_list does not.
 
@@ -623,6 +632,10 @@ sub _cc_to_perlre {
 }
 
 
+##############################################################################
+# $nfa
+##############################################################################
+
 =back
 
 =head2 Nfa
@@ -656,7 +669,7 @@ valid indexes of C<@$nfa>. There is exactly one initial state at index 0.
 
 =item C<nfa_clone(@nfas)>
 
-Maps each of the given C<@nfas> to clone.
+Maps each of the given C<@nfas> to a clone.
 
 =cut
 
@@ -1810,14 +1823,14 @@ sub nfa_to_dfa {
 =item C<dfa_to_min_dfa($in_dfa)>
 
 
-Computes a minimal deterministic dfa from the given C<$in_dfa>
+Computes a minimal deterministic C<$dfa> from the given C<$in_dfa>
 (Hopcroft's algorithm).
 
-Note that the given $C<$in_dfa> must be a C<$dfa>, as
-as returned from C<nfa_to_dfa>, and not a mere C<$nfa>.
+Note that the given C<$in_dfa> must be a C<$dfa>, as
+returned from C<nfa_to_dfa()>, and not a mere C<$nfa>.
 
-Myhill–Nerode theorem: two minimal dfa accepting
-the same language are isomorph (i.e. C<nfa_isomorph> returns true).
+Myhill-Nerode theorem: two minimal dfa accepting
+the same language are isomorph (i.e. C<nfa_isomorph()> returns true).
 
 =cut
 
@@ -1908,17 +1921,25 @@ sub dfa_to_min_dfa {
 
 =head2 Tree
 
-  $tree = [ $star, [ $alt_0, ... ] ]
-       or $char_class (ref($char_class) eq CHAR_CLASS)
-       or undef (accepting nothing)
-  $alt = [ $tree_0, ... ]
+  $tree = [ $star, [ $alt_0, $alt_1, ... ] ]
+       or $char_class # ref($char_class) eq CHAR_CLASS
+       or undef # accepting nothing
+  $alt = [ $tree_0, $tree_1, ... ]
 
 A C<$tree> is a hierarchical data structure used as intermediate form for
 regular expression generation routines.
 
-Similar to a parse tree, except that the $trees described here are not the
+Similar to a parse tree, except that the C<$tree>s described here are not the
 direct result of the parsing routines C<ere_to_xxx()>; indeed, the parsing
 routines generate a C<$nfa>, which then can be converted to a C<$tree>.
+
+A string is spanned by C<$tree = [$star, [ $alt_0, $alt_1, ... ] ]> if it is
+spanned by one of the C<$alt_i> (if C<$star> is false) of a repetition thereof
+(if C<$star> is true).
+
+A string is spanned by C<$alt = [ $tree_0, $tree_1, ...]> if it is the
+concatenation of C<@substrings>, each C<$substrings[$i]> being spanned by
+C<$$alt[$i]>.
 
 =over 4
 
@@ -2265,7 +2286,10 @@ if (TRACE_NFA_TO_TREE) {
     my %updates;
     # strarified first
     my @ks
-        = sort { exists($$path{$b}{$b}) <=> exists($$path{$a}{$a}) }
+        = sort {
+              exists($$path{$b}{$b}) <=> exists($$path{$a}{$a})
+           || $a <=> $b
+          }
           keys(%$path)
           # note that keys(%$path_tr) are not additionally needed
           # case i == k && k == j: nothing to do
@@ -2482,10 +2506,10 @@ sub _tree_factorize_fixes {
     }
 }
 
-=item C<tree_to_regex($tree, $to_perl)>
+=item C<tree_to_regex($tree, $to_perlre)>
 
-Converts a C<$tree> to an C<$ere> (if C<$to_perl> is false)
-or to a C<$perlre> (if C<$to_perl> is true).
+Converts a C<$tree> to an C<$ere> (if C<$to_perlre> is false)
+or to a C<$perlre> (if C<$to_perlre> is true).
 
 =cut
 
@@ -2612,7 +2636,8 @@ sub tree_concat2 {
         }
         else {
             if (
-                grep { ref($_) ne CHAR_CLASS && $$_[0] }
+                $FULL_FACTORIZE_FIXES
+             || grep { ref($_) ne CHAR_CLASS && $$_[0] }
                 map {@$_} @{$$tree_1[1]}
             ) {
                 # a (bc|de) -> (a(bc|de))
@@ -2630,7 +2655,6 @@ sub tree_concat2 {
         }
     }
     elsif (@{$$tree_0[1]} == 0) {
-        $concat = $tree_1;
         if (
             ref($tree_1) ne CHAR_CLASS
          && @{$$tree_1[1]} == 0
@@ -2707,7 +2731,8 @@ sub tree_concat2 {
             !grep { ref($_) ne CHAR_CLASS } @{$$tree_0[1][0]}
         ) {
             if (
-                grep { ref($_) ne CHAR_CLASS && $$_[0] }
+                $FULL_FACTORIZE_FIXES
+             || grep { ref($_) ne CHAR_CLASS && $$_[0] }
                 map {@$_} @{$$tree_1[1]}
             ) {
                 # (ab) (cd|ef)  -> (ab(cd|ef))
@@ -2739,7 +2764,8 @@ sub tree_concat2 {
             }
             else {
                 if (
-                    grep { ref($_) ne CHAR_CLASS && $$_[0] }
+                    $FULL_FACTORIZE_FIXES
+                 || grep { ref($_) ne CHAR_CLASS && $$_[0] }
                     map {@$_} @{$$tree_0[1]}
                 ) {
                     # (ab|cd) e  -> ((ab|cd)e)
@@ -2769,7 +2795,8 @@ sub tree_concat2 {
         ) {
             if (!grep { ref($_) ne CHAR_CLASS } @{$$tree_1[1][0]}) {
                 if (
-                    grep { ref($_) ne CHAR_CLASS && $$_[0] }
+                    $FULL_FACTORIZE_FIXES
+                 || grep { ref($_) ne CHAR_CLASS && $$_[0] }
                     map {@$_} @{$$tree_0[1]}
                 ) {
                     # (ab|cd) (ef)  -> ((ab|cd)ef)
@@ -2964,7 +2991,7 @@ sub tree_dump {
 
 
 ##############################################################################
-# Input constraints
+# $input_constraints
 ##############################################################################
 
 use constant {
@@ -3326,7 +3353,7 @@ sub cc_to_input_constraint {
 
 
 ##############################################################################
-# Parsing eres
+# $ere
 ##############################################################################
 
 =back
@@ -3375,7 +3402,7 @@ All unicode characters supported by perl are allowed as litteral characters.
 Parses an C<$ere> to a C<$nfa>.
 
 WARNING: the parsing routines, in particular C<ere_to_xxx()>,
-C<die()>s on syntax errors; thus the caller may want to eval-trap such errors.
+C<die()> on syntax errors; thus the caller may want to eval-trap such errors.
 
 =cut
 
@@ -3659,6 +3686,11 @@ sub parse_die {
     die("malformed regex: $msg at "
       . (pos($$str_ref) || 0) . " in $$str_ref");
 }
+
+
+##############################################################################
+# Shorthands
+##############################################################################
 
 =back
 

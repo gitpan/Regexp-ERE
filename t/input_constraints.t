@@ -54,7 +54,8 @@ my $num_tests = 0;
 BEGIN {
     @test_cases = (
         [
-            [ # regexs to be and-ed
+            0
+          , [ # regexs to be and-ed
                 '^(beg1|beg2)-'
               , '-(mid1|mid2)-'
               , '-(end1|end2)$'
@@ -67,7 +68,8 @@ BEGIN {
             ]
         ]
       , [
-            [
+            0
+          , [
                 '^[^@]+@[^@]+$'
               , '^(john(\\.smith)?|fred(\\.miller)?)@.*$'
               , '^.*@(company1\.com|company2\.com)$'
@@ -78,7 +80,8 @@ BEGIN {
             ]
         ]
       , [
-            [
+            0
+          , [
                 '^ab'
               , 'bc$'
             ]
@@ -88,18 +91,22 @@ BEGIN {
               , ['c']
             ]
         ]
-      , [
-            [
+      ,
+        [
+            1
+          , [
                 '^(x,?){10}$'
               , '^x+(,x+)*$'
             ]
           , [
-                'free text'
-              , ['x' ]
+                ['x']
+              , 'free text'
+              , ['x']
             ]
         ]
       , [
-            [
+            0
+          , [
                 '^[^@]*@([^@]+\.)*domain[12]\.com$'
             ]
           , [
@@ -111,15 +118,16 @@ BEGIN {
         ]
     );
     for my $test_case (@test_cases) {
-        my $nfa = nfa_inter(map { ere_to_nfa($_) } @{$$test_case[0]});
+        local($Regexp::ERE::FULL_FACTORIZE_FIXES) = $$test_case[0];
+        my $nfa = nfa_inter(map { ere_to_nfa($_) } @{$$test_case[1]});
         my ($input_fields, $split_perlre) = nfa_to_input_constraints($nfa);
-        $$test_case[2] = $nfa;
-        $$test_case[3] = $input_fields;
-        $$test_case[4] = $split_perlre;
-        $$test_case[5] = expand_input_constraints($input_fields);
+        $$test_case[3] = $nfa;
+        $$test_case[4] = $input_fields;
+        $$test_case[5] = $split_perlre;
+        $$test_case[6] = expand_input_constraints($input_fields);
         $num_tests
          += 1                   # input constraints comparison
-          + @{$$test_case[5]}   # perl re match
+          + @{$$test_case[6]}   # perl re match
           + 1                   # input constraints weaker than nfa
         ;
     }
@@ -129,29 +137,29 @@ use Test::More tests => $num_tests;
 
 for my $test_case (@test_cases) {
     is_deeply(
-        $$test_case[1]
-      , $$test_case[3]
+        $$test_case[2]
+      , $$test_case[4]
       , 'input constraints comparison: '
-      . join(', ', @{$$test_case[0]})
-      . ' exp: '
-      . input_constraints_to_str($$test_case[1])
+      . join(', ', @{$$test_case[1]})
       . ' got: '
-      . input_constraints_to_str($$test_case[3])
+      . input_constraints_to_str($$test_case[2])
+      . ' exp: '
+      . input_constraints_to_str($$test_case[4])
     );
-    for my $string (@{$$test_case[5]}) {
-        my $perlre = $$test_case[4];
+    for my $string (@{$$test_case[6]}) {
+        my $perlre = $$test_case[5];
         ok(
             $string =~ $perlre
           , "input constraints weaker perl re match $string against $perlre"
         );
     }
-    my $dfa1 = nfa_to_min_dfa($$test_case[2]);
+    my $dfa1 = nfa_to_min_dfa($$test_case[3]);
     my $dfa2 = nfa_to_min_dfa(nfa_inter(
         $dfa1
-      , nfa_union(map { ere_to_nfa("^$_\$")  } @{$$test_case[5]})
+      , nfa_union(map { ere_to_nfa("^$_\$")  } @{$$test_case[6]})
     ));
     ok(
         nfa_isomorph($dfa1, $dfa2)
-      , 'input constraints weaker than nfa ' . nfa_to_regex($$test_case[2])
+      , 'input constraints weaker than nfa ' . nfa_to_regex($$test_case[3])
     );
 }
