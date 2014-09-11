@@ -11,6 +11,7 @@ Pure perl module for:
     Non-Deterministic Finite Automata (nfa)
 
   - Manipulating nfa (and-ing, or-ing, concatenating)
+    and inspecting them (transparent, documented data structure)
 
   - Computing Deterministic Finite Automata (dfa) from nfa
     (powerset construction)
@@ -36,9 +37,17 @@ VERSIONS
     0.01 initial version
     0.02 minor documentation improvements
          fixes for bugs revealed by perl 17:
-           - results independent of the sort algorithm (stable/unstable)
+           - results independent of the hash key order
            - improved prefix/suffix factorization
            - improved test cases
+    0.03 minor documentation improvements
+         new quote function
+         improved ere parsing (a+ as a*a or aa* depending on the context)
+         improved tree construction/factorization
+         additional test cases
+         bug fixes:
+           - _tree_to_regex missed a starification
+           - drop-downs including the empty string were discarded
 
 
 AUTHOR

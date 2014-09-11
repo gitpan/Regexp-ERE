@@ -24,10 +24,9 @@ BEGIN {
       , ['^a{3,5}$', '^aa{1,3}a$']
       , ['^a{3,}$', '^aa+a$']
       , ['^a{3,}$', '^aa*aa$']
+      , ['^(a*ab)*$', '^(aa*b)*$']
+      , ['^(a*ab)*$', '^(a+b)*$']
     );
-}
-
-sub ere_equivalent {
 }
 
 use Test::Simple tests => scalar(@ere_pairs);

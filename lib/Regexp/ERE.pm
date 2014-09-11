@@ -4,7 +4,7 @@ use warnings;
 use integer;
 
 package Regexp::ERE;
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 BEGIN {
     use Exporter ();
@@ -33,6 +33,7 @@ BEGIN {
         &char_to_cc
         &interval_list_to_cc
         &cc_union
+        &quote
     );
 }
 
@@ -113,7 +114,7 @@ Heuristically deriving (possibly weaker) constraints from a C<$nfa> or C<$dfa>
 suitable for display in a graphical user interface,
 i.e. a sequence of widgets of type 'free text' and 'drop down';
 
-Example: '^(abc|def)' => $nfa => [['abc', 'def'], 'free text']
+Example: C<'^(abc|def)'> => C<$nfa> => C<[['abc', 'def'], 'free text']>
 
 =back
 
@@ -181,7 +182,7 @@ conforming to a given C<$nfa>.
 # Config
 ##############################################################################
 
-# If true, nfa_to_tree() always expands concatned alternations.
+# If true, nfa_to_tree() always expands concatenated alternations.
 # Example: (ab|cd) (ef|gh)  -> (abef|abgh|cdef|cdgh)
 our $TREE_CONCAT_FULL_EXPAND = 0;
 
@@ -217,14 +218,14 @@ for instance C<use ERE qw(&ere_to_nfa &nfa_match);>.
 
 
 WARNING: C<$char_class>es must be created exclusively by
-      char_to_cc()
-   or interval_list_to_cc()
+      C<char_to_cc()>
+   or C<interval_list_to_cc()>
 for equivalent character classes to be always the same array reference.
 For the same reason, C<$char_class>es must never be mutated.
 
 In this implementation, the state transitions of a C<$nfa> are based upon
 character classes (not single characters). A character class is an ordered
-list of disjunct, non-mergeable intervals (over unicode code points,
+list of disjoint, non-mergeable intervals (over unicode code points,
 i.e. positive integers).
 
   $char_class = [
@@ -249,13 +250,13 @@ Exceptions (anchors used only in the parsing phase only):
     begin or end  : [ -3, -1 ]
 
 Immediately after parsing, such pseudo-character classes
-are removed by C<nfa_resolve_anchors()>.
+are removed by C<nfa_resolve_anchors()> (internal subroutine).
 
 =over 4
 
 =cut
 
-our $ERE_litteral = qr/ [^.[\\()*+?{|^\$] /xms;
+our $ERE_literal = qr/ [^.[\\()*+?{|^\$] /xms;
 our $PERLRE_char_class_special = qr/ [\[\]\\\^\-] /xms;
 
 our $cc_any = bless([[ 0, MAX_CHAR ]], CHAR_CLASS);
@@ -275,7 +276,7 @@ our $cc_end = bless([[ -3, -2]], CHAR_CLASS);
 
 =item char_to_cc($c)
 
-Returns the unique $char_class equivalent to C<[[ord($c), ord($c)]]>.
+Returns the unique C<$char_class> equivalent to C<[[ord($c), ord($c)]]>.
 
 =cut
 
@@ -300,9 +301,9 @@ Example:
     returns [[65, 90], [97, 122]]
     (i.e [f-p]|[A-Z]|[a-f]|[q-z] => [A-Z]|[a-z])
 
-Note that both $interval_list and $char_class are lists of intervals,
-but only $char_class obeys the constraints above,
-while $interval_list does not.
+Note that both C<$interval_list> and C<$char_class> are lists of intervals,
+but only C<$char_class> obeys the constraints above,
+while C<$interval_list> does not.
 
 Remark also that C<interval_list_to_cc($char_class)> is the identity
 (returns the same reference as given) on C<$char_class>es returned
@@ -504,7 +505,7 @@ sub cc_to_regex {
             }
             else {
                 push(@items,
-                    $c =~ /$ERE_litteral/o
+                    $c =~ /$ERE_literal/o
                   ? $c
                   : "\\$c"
                 );
@@ -776,7 +777,7 @@ sub _nfa_shrink_equiv {
     return $nfa;
 }
 
-=item C<nfa_quant($in_nfa, $min, $max)>
+=item C<nfa_quant($in_nfa, $min, $max, $prev_has_suffix, $next_has_prefix)>
 
 Precondition: C<0 <= $min && ( $max eq '' || $min <= $max)>
 
@@ -792,26 +793,46 @@ and m is the concatenation of (l_1, ..., l_r)
 
 Examples with C<$in_nfa> being a C<$nfa> accepting C<'^a$'>:
 
-  nfa_quant($in_nfa, 2, 4 ) accepts '^a{2,4}$'
-  nfa_quant($in_nfa, 0, '') accepts '^a{0,}$' (i.e. '^a*$')
+    nfa_quant($in_nfa, 2, 4 ) accepts '^a{2,4}$'
+    nfa_quant($in_nfa, 0, '') accepts '^a{0,}$' (i.e. '^a*$')
+
+C<$pref_has_prefix> and C<$next_has_prefix> are hints for dispatching C<$min>,
+for example:
+
+    'a+'    => 'a*a'  (!$prev_has_suffix &&  $next_has_prefix)
+    'a+'    => 'aa*'  ( $prev_has_suffix && !$next_has_prefix)
+    'a{2,}' => 'aa*a' ( $prev_has_suffix &&  $next_has_prefix)
 
 =cut
 
 sub nfa_quant {
-    my ($nfa, $min, $max) = @_;
+    my ($nfa, $min, $max, $prev_has_suffix, $next_has_prefix) = @_;
     my @quant_parts;
-    if ($min > 0) {
-        push(@quant_parts, nfa_concat(nfa_clone(($nfa) x $min)));
-    }
-
     my $optional_part;
-    if (
-        length($max) == 0
-     || $max > $min
-    ) {
+
+    # dispatch min left and right: a+b => a*ab, ba+ => baa*
+    use integer;
+    my ($min_left, $min_right)
+      =
+        # no suffix, no prefix
+        $min == 0                                    ? (0         , 0     )
+
+        # no suffix, maybe prefix
+      : !($next_has_prefix && _nfa_has_suffix($nfa)) ? ($min      , 0     )
+
+        # suffix, no prefix
+      : !($prev_has_suffix && _nfa_has_prefix($nfa)) ? (0         , $min  )
+
+        # suffix and prefix
+      :                                                (($min+1)/2, $min/2)
+    ;
+
+    if ($min_left > 0) {
+        push(@quant_parts, nfa_concat(nfa_clone(($nfa) x $min_left)));
+    }
+    if (length($max) == 0 || $max > $min) {
         if ($$nfa[0][0]) {
             # initial state already accepting
-            # (a*)?
             ($optional_part) = nfa_clone($nfa);
         }
         elsif (
@@ -820,13 +841,11 @@ sub nfa_quant {
             @$nfa
         ) {
             # initial state not accepting and unreachable
-            # (a)?
             ($optional_part) = nfa_clone($nfa);
             $$optional_part[0][0] = 1;
         }
         else {
             # initial state not accepting and reachable
-            # (a*b)?
             $optional_part = [
                 # additional root initial state accepting state
                 [
@@ -901,7 +920,6 @@ sub nfa_quant {
                 }
             }
         }
-
         push(@quant_parts,
             keys(%$state_ind_to_equiv)
           ?  _nfa_shrink_equiv($optional_part, $state_ind_to_equiv)
@@ -915,6 +933,9 @@ sub nfa_quant {
         push(@quant_parts, _nfa_concat(1, nfa_clone(
             ($optional_part) x ($max - $min)
         )));
+    }
+    if ($min_right > 0) {
+        push(@quant_parts, nfa_concat(nfa_clone(($nfa) x $min_right)));
     }
     return @quant_parts == 1 ? $quant_parts[0] : nfa_concat(@quant_parts);
 }
@@ -1047,16 +1068,16 @@ sub _nfa_concat {
                 #     ( x[ab]* | y[ac]* | z[bc]* ) a* c
                 #     the state for a* is only needed after [bc]*
                 #     the regular expression is equivalent to:
-                #     [ab]*c | y[ac]*c | z[bc]*a*c
+                #     x[ab]*c | y[ac]*c | z[bc]*a*c
                 #
                 # Note that this one-letter-star optimization is
                 # probably not very useful for practical purposes;
                 # more general equivalences like (abc)*(abc)* ~ (abc)*
-                # are not catched up, while the focused use cases
+                # are not caught up, while the focused use cases
                 # of prefix and suffix recognition need no star at all.
                 #
-                # It is merely a toy optimization for solving some exercices
-                # of an introductory course on regexes.
+                # It is merely a toy optimization for solving some exercises
+                # of an introductory course on regexs.
                 #
                 push(@{$$state[1]},
                     map { [ @$_ ] }
@@ -1086,7 +1107,7 @@ sub _nfa_concat {
         elsif ($starifying) {
             # $starifying set for optimizing x{n,m}.
             # The old accepting states are redundant,
-            # since reacheble iff the newer ones are.
+            # since reachable iff the newer ones are.
             for (@accepting_state_inds[1..$#accepting_state_inds]) {
                 $$concat[$_][0] = 0;
             }
@@ -1325,7 +1346,7 @@ sub nfa_resolve_anchors {
     while (defined(my $beg = pop(@todo))) {
         for (
             map { $$_[1] }               # state_ind
-            grep { $$_[0][0][1] == -1 }  # begin-achor
+            grep { $$_[0][0][1] == -1 }  # begin-anchor
             @{$$nfa[$beg][1]}
         ) {
             if (!exists($begs{$_})) {
@@ -1369,7 +1390,7 @@ sub nfa_resolve_anchors {
         while (defined(my $begend = pop(@todo))) {
             for (
                 map { $$_[1] }             # state_ind
-                grep { $$_[0][0][1] < 0 }  # achor
+                grep { $$_[0][0][1] < 0 }  # anchor
                 @{$$nfa[$begend][1]}
             ) {
                 if (!exists($begs{$_}) && !exists($begends{$_})) {
@@ -1456,7 +1477,7 @@ sub nfa_resolve_anchors {
     }
     delete($path_tr{0});
 
-    # extend intial state (merge all initial states of %begs)
+    # extend initial state (merge all initial states of %begs)
     if (keys(%begs) > 1) {
         my %state_ind_to_char_classes;
         for ( map { @{$$nfa[$_][1]} } keys(%begs) ) {
@@ -1640,7 +1661,7 @@ sub nfa_isomorph {
 # input X:
 #     Arbitrary list of intervals.
 # output Y:
-#     List of paarwise disjoint intervals spanning the same subset such that
+#     List of pairwise disjoint intervals spanning the same subset such that
 #     for any intersections/unions of intervals of X
 #     an equal union of intervals of Y exists.
 #     In short, all boundaries of X are preserved.
@@ -1736,7 +1757,7 @@ Compute a deterministic finite automaton from C<$in_nfa>
 The data structure of a deterministic finite automaton (dfa) is
 the same as that of a non-deterministic one, but it is further constrained:
 For each state and each unicode character there exist exactly one transition
-(i.e. a pair C<(char_class, $state_index)>) matching this character.
+(i.e. a pair C<($char_class, $state_index)>) matching this character.
 
 Note that the following constraint hold for both a C<$dfa> and a C<$nfa>:
 For each pair of state p1 and p2, there exists at most one transition
@@ -1953,9 +1974,9 @@ Returns C<undef> if the C<$nfa> accepts nothing (not even the empty string).
 sub nfa_to_tree {
     my ($nfa) = @_;
 
-    # Warshall algorithm (Kleen's theorem)
+    # Warshall algorithm (Kleene's theorem)
     # with preliminary computations:
-    #   - words-pathes (unbranched pathes) are shrinked
+    #   - words-paths (unbranched paths) are shrunken
     #   - unique accepting state is ensured
     #   - branches (with single parent) are skipped
 
@@ -1963,7 +1984,7 @@ sub nfa_to_tree {
     my $path_tr = {};
     my %accepting_state_inds;
 
-    # Initialization of the pathes
+    # Initialization of the paths
 
     for my $i (0..$#$nfa) {
         if ($$nfa[$i][0]) {
@@ -1987,19 +2008,41 @@ if (TRACE_NFA_TO_TREE) {
     my @tree_list;
     my @state_ind_path;
 
-    # word-pathes (unbranched pathes) are shrinked
+    # word-paths (unbranched paths) are shrunken
     for my $first (0..$#$nfa) {
         if (!exists($$path{$first})) { next; }
-        my @todo = keys(%{$$path{$first}});
+        my @todo
+          = sort {
+                keys(%{$$path_tr{$b}}) <=> keys(%{$$path_tr{$a}})
+             || $b <=> $a
+            }
+            grep { $_ != $first }
+            keys(%{$$path{$first}})
+        ;
         my %todo_ctrl;
-        while (@todo) {
+        my $todo_sorted = 1;
+        while (
+            @todo
+         && (
+                !$todo_sorted
+             || keys(%{$$path_tr{$todo[-1]}}) == 1
+            )
+        ) {
             $todo_ctrl{my $i = pop(@todo)} = undef;
-            if (
-                keys(%{$$path_tr{$i}}) != 1
-             || $i == $first
-            ) {
+            if (keys(%{$$path_tr{$i}}) != 1) {
+                if ($i != $first && !$todo_sorted && @todo) {
+                    @todo
+                      = sort {
+                            keys(%{$$path_tr{$b}}) <=> keys(%{$$path_tr{$a}})
+                         || $b <=> $a
+                        }
+                        keys%{{ map { ($_ => undef) } (@todo, $i) }}
+                    ;
+                    $todo_sorted = 1;
+                }
                 next;
             }
+            $todo_sorted = 0;
 
             my @tree_list = ($$path{$first}{$i});
             my @state_ind_path = ($i);
@@ -2183,7 +2226,7 @@ if (TRACE_NFA_TO_TREE) {
              && (
                     # starified parent
                     $$tmp_path{$parent}{$branch}[0]
-                    # parent containing several pathes
+                    # parent containing several paths
                  || @{$$tmp_path{$parent}{$branch}[1]} > 1
                 )
             ) {
@@ -2282,21 +2325,28 @@ if (TRACE_NFA_TO_TREE) {
       = tree_starify($$path{$_}{$_});
     }
 
+if (TRACE_NFA_TO_TREE) {
+    print STDERR "after diagonal starification\n";
+    for my $i (sort {$a <=> $b} (keys(%$path))) {
+    for my $j (sort {$a <=> $b} (keys(%{$$path{$i}}))) {
+        print STDERR "$i $j: ";
+        print STDERR tree_dump($$path{$i}{$j}) . "\n";
+    }}
+}
+
     # Warshall algorithm (Kleene's theorem)
     my %updates;
-    # strarified first
-    my @ks
-        = sort {
-              exists($$path{$b}{$b}) <=> exists($$path{$a}{$a})
-           || $a <=> $b
-          }
-          keys(%$path)
-          # note that keys(%$path_tr) are not additionally needed
-          # case i == k && k == j: nothing to do
-          # case i != k && k != j: $$path{$k}{$j} must exist
-          # case i == k && k != j: $$path{$k}{$k} must exist
-          # case i != k && k == j: $$path{$k}{$k} must exist
-    ;
+    my %weight = map {
+        my $w = 0;
+        for (values(%{$$path{$_}})) { $w += _tree_weight($_) }
+        ($_ => $w);
+    } keys(%$path);
+    my @ks = sort { $weight{$a} <=> $weight{$b} || $a <=> $b } keys(%$path);
+    # note that keys(%$path_tr) are not additionally needed
+    # case i == k && k == j: nothing to do
+    # case i != k && k != j: $$path{$k}{$j} must exist
+    # case i == k && k != j: $$path{$k}{$k} must exist
+    # case i != k && k == j: $$path{$k}{$k} must exist
     for my $k (@ks) {
         for my $i (keys(%{$$path_tr{$k}})) {   # i -> k
             for my $j (keys(%{$$path{$k}})) {  # k -> j
@@ -2358,7 +2408,7 @@ if (TRACE_NFA_TO_TREE) {
 
     my $tree;
 
-    # accepting emtpy init
+    # accepting empty init
     if ($$nfa[0][0]) {
 
         my $path_0_0 = exists($$path{0}{0}) ? $$path{0}{0} : $cc_none;
@@ -2436,7 +2486,6 @@ sub _tree_factorize_fixes {
         return $tree;
     }
     else {
-
         for (grep { grep { ref($_) ne CHAR_CLASS } @$_ } @{$$tree[1]} ) {
             my $tmp_tree =
                 tree_concat(map { _tree_factorize_fixes($_) } @$_)
@@ -2451,6 +2500,21 @@ sub _tree_factorize_fixes {
             else {
                 $_ = $$tmp_tree[1][0];
             }
+        }
+
+        # flatten
+        @{$$tree[1]} = map {
+            [map {
+                ref($_) ne CHAR_CLASS
+             && !$$_[0] && @{$$_[1]} == 1
+              # non-starified with single alternation
+              ? @{$$_[1][0]}
+              : $_
+            } grep { defined($_) } @$_]
+        } @{$$tree[1]};
+
+        if (@{$$tree[1]} == 1) {
+            return $tree;
         }
 
         my $fst_len = @{$$tree[1][0]};
@@ -2468,7 +2532,7 @@ sub _tree_factorize_fixes {
                      || ref($$_[$i]) ne CHAR_CLASS
                      || $$tree[1][0][$i] != $$_[$i]
                     }
-                    @{$$tree[1]}[0..$#{$$tree[1]}]
+                    @{$$tree[1]}[1..$#{$$tree[1]}]
                 ) {
                     last;
                 }
@@ -2545,7 +2609,10 @@ sub tree_to_regex {
                 );
             }
             else {
-                return _tree_to_regex([$$tree[0], $$atom[1]], $to_perlre);
+                return _tree_to_regex(
+                    [$$tree[0] || $$atom[0], $$atom[1]]
+                  , $to_perlre
+                );
             }
         }
         else {
@@ -2946,7 +3013,7 @@ sub tree_alt {
 }
 
 
-# returns an unachored $ere having exactly the same structure
+# returns an unanchored $ere having exactly the same structure
 # as the given $tree. Intended for tracing/debugging.
 sub tree_dump {
     my ($tree) = @_;
@@ -2989,6 +3056,23 @@ sub tree_dump {
     }
 }
 
+# Heuristic weight function for the processing order of the warshall algorithm
+sub _tree_weight {
+    my ($tree) = @_;
+    my $weight = 0;
+    if (ref($tree) eq CHAR_CLASS) {
+        for (@$tree) {
+            $weight += ($$_[0] == $$_[1] ? 1 : 2);
+        }
+    }
+    elsif (defined($tree)) {
+        for (map { @$_ } @{$$tree[1]}) {
+            $weight += _tree_weight($_);
+        }
+    }
+    return $weight;
+}
+
 
 ##############################################################################
 # $input_constraints
@@ -3014,7 +3098,7 @@ use constant {
 Converts a C<$tree> to a pair C<($input_constraints, $split_str)>.
 
 C<$split_perlre> is a compiled perl regular expression splitting a string
-according to C<$input_constraints>. This C<$perlre> matches if and only if
+accordingly to C<$input_constraints>. This C<$perlre> matches if and only if
 each drop down can be assigned a value; then C<$str =~ $perlre> in list
 context returns as many values as C<@$input_constraints>.
 
@@ -3023,7 +3107,7 @@ context returns as many values as C<@$input_constraints>.
 sub tree_to_input_constraints {
     my ($input_constraints, $perlres) = &_tree_to_input_constraints;
 
-    # concat free texts and stronger underlying regexs
+    # concatenate free texts and stronger underlying regexs
     my @previous_undefs;
     my @kept;
     for my $i (0..$#$input_constraints) {
@@ -3062,7 +3146,7 @@ sub tree_to_input_constraints {
     }
 
     # remove empty words
-    # concat single words
+    # concatenate single words
     my @previous_singles;
     @kept = ();
     for my $i (0..$#$input_constraints) {
@@ -3214,7 +3298,7 @@ sub tree_to_input_constraints {
                         @$sub_input_constraints
                      && (
                             $$sub_input_constraints[0] eq FREE_TEXT
-                         || length($$sub_input_constraints[0][0])
+                         || grep { length($_) } @{$$sub_input_constraints[0]}
                         )
                     ) {
                         push(@$input_constraints, @$sub_input_constraints);
@@ -3393,7 +3477,7 @@ In bracket expressions, C<\> is a normal character,
 thus C<]> as character must occur first, or second after a C<^>
 (POSIX compliant, but possibly surprising for perl programmers).
 
-All unicode characters supported by perl are allowed as litteral characters.
+All unicode characters supported by perl are allowed as literal characters.
 
 =over 4
 
@@ -3487,7 +3571,7 @@ sub bracket_expression_to_cc {
     my $neg = $$str_ref =~ /\G \^/xmsgc;
     my $interval_list = [];
 
-    # anything is allowd a first char, in particular ']' and '-'
+    # anything is allowed a first char, in particular ']' and '-'
     if ($$str_ref =~ /\G (.) - ([^]]) /xmsgc) {
         push(@$interval_list, [ord($1), ord($2)]);
     }
@@ -3559,18 +3643,31 @@ sub parse_quant {
     }
 }
 
+=item quote($string)
+
+Returns $string with escaped special characters.
+
+=cut
+
+sub quote {
+    my ($str) = @_;
+    $str =~ s/([.\[\\(*+?{|^\$])/\\$1/xsmg;
+    return $str;
+}
+
 {
     my %char_to_cc_cache;
     sub parse_alternation {
         my ($str_ref, $has_anchor_ref) = @_;
         my @all_nfas;
         my $loop;
+        my @quants;
         do {
             $loop = 0;
             my $nfa = [];
             my $next_state_index = 1;
             while (1) {
-                if ($$str_ref =~ /\G ( $ERE_litteral + ) /xmsogc) {
+                if ($$str_ref =~ /\G ( $ERE_literal + ) /xmsogc) {
                     push(@$nfa,
                         map {
                             [ 0, [[
@@ -3636,16 +3733,13 @@ sub parse_quant {
 
             if (@$nfa) {
                 if ($$str_ref =~ /\G (?= [*+?{] ) /xmsgc) {
-                    my ($min, $max) = parse_quant($str_ref);
                     my $last_char_class = $$nfa[$#$nfa][1][0][0];
                     if (@$nfa > 1) {
                         @{$$nfa[$#$nfa]} = (1, []);
                         push(@all_nfas, $nfa);
                     }
-                    push(@all_nfas, nfa_quant(
-                        [ [0, [[$last_char_class, 1 ]]], [1, []] ]
-                      , $min, $max
-                    ));
+                    push(@quants, [scalar(@all_nfas), parse_quant($str_ref)]);
+                    push(@all_nfas, [[0, [[$last_char_class, 1 ]]], [1, []]]);
                     $loop = 1;
                 }
                 else {
@@ -3660,15 +3754,23 @@ sub parse_quant {
                     parse_die(') expected', $str_ref);
                 }
                 if ($$str_ref =~ /\G (?= [*+?{] ) /xmsgc) {
-                    my ($min, $max) = parse_quant($str_ref);
-                    push(@all_nfas, nfa_quant($nfa, $min, $max));
+                    push(@quants, [scalar(@all_nfas), parse_quant($str_ref)]);
                 }
-                else {
-                    push(@all_nfas, $nfa);
-                }
+                push(@all_nfas, $nfa);
                 $loop = 1;
             }
         } while ($loop);
+
+        for (@quants) {
+            my ($i, $min, $max) = @$_;
+            $all_nfas[$i] = nfa_quant(
+                $all_nfas[$i]
+              , $min, $max
+              , $min && $i != 0          && _nfa_has_suffix($all_nfas[$i-1])
+              , $min && $i != $#all_nfas && _nfa_has_prefix($all_nfas[$i+1])
+            );
+        }
+
         if (@all_nfas > 1) {
             return nfa_concat(@all_nfas);
         }
@@ -3679,6 +3781,18 @@ sub parse_quant {
             return [[1, []]];
         }
     }
+}
+
+sub _nfa_has_prefix {
+    my ($nfa) = @_;
+    # initial state non-accepting or no loop back to it
+    !$$nfa[0][0] || !grep { $$_[1] == 0 } map { @{$$_[1]} } @$nfa;
+}
+
+sub _nfa_has_suffix {
+    my ($nfa) = @_;
+    # all accepting states are final
+    !grep { $$_[0] && @{$$_[1]} } @$nfa
 }
 
 sub parse_die {

@@ -8,6 +8,7 @@ t/input_constraints.t
 t/nfa_comparison.t
 t/nfa_intersection.t
 t/regex_comparison.t
+t/regex_divisor.t
 t/regex_match.t
 t/regex_roundtrip.t
 t/tree_concatenation.t

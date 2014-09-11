@@ -13,13 +13,13 @@ use Regexp::ERE qw(
 our @trees;
 BEGIN {
     our @trees = (
-        # emtpy string
+        # empty string
         $Regexp::ERE::cc_none
 
         # single char
       , char_to_cc('a')
 
-        # emtpy string (longer tree representation)
+        # empty string (longer tree representation)
       , [ 0, [] ]
 
         # starified word (ab)*

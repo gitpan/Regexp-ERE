@@ -21,7 +21,7 @@ BEGIN {
     $lit_1 = char_to_cc('1');
     @nfa_pairs = (
 
-        # nfa pair: occurences of b = 1 (mod 3)
+        # nfa pair: occurrences of b = 1 (mod 3)
         [
             [ # first nfa
                 [      # state 0
@@ -82,21 +82,21 @@ BEGIN {
                 ]
             ]
           , [ # second nfa
-                [      # state 0     occurences of b = 0 (mod 3)
+                [      # state 0     occurrences of b = 0 (mod 3)
                     0  # rejecting
                   , [
                         [$lit_a, 0]
                       , [$lit_b, 2]
                     ]
                 ]
-              , [      # state 1     occurences of b = 2 (mod 3)
+              , [      # state 1     occurrences of b = 2 (mod 3)
                     0  # rejecting
                   , [
                         [$lit_a, 1]
                       , [$lit_b, 0]
                     ]
                 ]
-              , [      # state 2     occurences of b = 1 (mod 3)
+              , [      # state 2     occurrences of b = 1 (mod 3)
                     1  # accepting
                   , [
                         [$lit_a, 2]

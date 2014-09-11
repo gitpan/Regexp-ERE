@@ -29,7 +29,7 @@ sub expand_input_constraints {
     ];
 }
 
-# simliar to shell expression before brace expansion
+# similar to shell expression before brace expansion
 sub input_constraints_to_str {
     my ($input_constraints) = @_;
     return join('',
@@ -62,9 +62,9 @@ BEGIN {
               , '^[^-]*-[^-]*-[^-]*$'
             ]
           , [ # expected input constraints
-                [ 'beg1', 'beg2' ],
-              , [ '-mid1', '-mid2' ]
-              , [ '-end1', '-end2' ]
+                [ 'beg1-', 'beg2-' ],
+              , [ 'mid1-', 'mid2-' ]
+              , [ 'end1', 'end2' ]
             ]
         ]
       , [
@@ -116,6 +116,85 @@ BEGIN {
               , ['domain1.com', 'domain2.com']
             ]
         ]
+      , [
+            0
+          , [
+                '^([^.]+\.)+abc\.com$'
+            ]
+          , [
+                'free text'
+              , ['.abc.com']
+            ]
+        ]
+      , [
+            0
+          , [
+                '^www\.abc(\.[^.]+)+$'
+            ]
+          , [
+                ['www.abc.']
+              , 'free text'
+            ]
+        ]
+      , [
+            0
+          , [
+                '^ab{10,15}c$'
+            ]
+          , [
+                [
+                    'abbbbbbbbbbbbbbbc'
+                  , 'abbbbbbbbbbbbbbc'
+                  , 'abbbbbbbbbbbbbc'
+                  , 'abbbbbbbbbbbbc'
+                  , 'abbbbbbbbbbbc'
+                  , 'abbbbbbbbbbc'
+                ]
+            ]
+        ]
+      , [
+            1
+          , [
+                '^ab{10,15}c$'
+            ]
+          , [
+                [ 'abbbbbb' ]
+              , 'free text'
+              , [ 'bbbbc' ]
+            ]
+        ]
+      , [
+            0
+          , [
+                '^([^.]+\.)+(company1|company2)\.com$'
+            ]
+          , [
+                'free text'
+              , [ '.company1.com', '.company2.com' ]
+            ]
+        ]
+      , [
+            0
+          , [
+                '^([^.]+\.)*(company1|company2)\.com$'
+            ]
+          , [
+                'free text'
+              , [ 'company1.com', 'company2.com' ]
+            ]
+        ]
+      , [
+            1
+          , [
+                '^([^.]+\.)*(company1|company2)\.com$'
+            ]
+          , [
+                'free text'
+              , [ 'company' ]
+              , [ '1', '2' ]
+              , [ '.com' ]
+            ]
+        ]
     );
     for my $test_case (@test_cases) {
         local($Regexp::ERE::FULL_FACTORIZE_FIXES) = $$test_case[0];
@@ -134,17 +213,18 @@ BEGIN {
 }
 
 use Test::More tests => $num_tests;
+use Time::HiRes qw();
 
 for my $test_case (@test_cases) {
     is_deeply(
-        $$test_case[2]
-      , $$test_case[4]
+        $$test_case[4]
+      , $$test_case[2]
       , 'input constraints comparison: '
       . join(', ', @{$$test_case[1]})
       . ' got: '
-      . input_constraints_to_str($$test_case[2])
-      . ' exp: '
       . input_constraints_to_str($$test_case[4])
+      . ' exp: '
+      . input_constraints_to_str($$test_case[2])
     );
     for my $string (@{$$test_case[6]}) {
         my $perlre = $$test_case[5];
